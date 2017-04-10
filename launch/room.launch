@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="UZH_dataset_warpper" type="UZH_dataset_warpper" name="UZH_dataset_warpper" output="screen">
+        <param name="dataset_path_base" type="string" value="/home/timer/bags/uzh_datasets/room" />
+    </node>
+</launch>
