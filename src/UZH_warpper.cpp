@@ -75,7 +75,7 @@ sensor_msgs::ImagePtr UZH_warpper::next_img()
 
     cv_bridge::CvImage img_msg;
     img_msg.header = header;
-    img_msg.encoding = sensor_msgs::image_encodings::TYPE_8UC1;
+    img_msg.encoding = sensor_msgs::image_encodings::MONO8;
     img_msg.image = cv::imread(file_name,0);
     return img_msg.toImageMsg();
 }
@@ -90,13 +90,15 @@ Depth_data UZH_warpper::next_depth()
 
     FILE *depth_file = fopen(file_name.c_str(),"r");
 
+    depth.depth = Eigen::MatrixXd::Zero(height,width);
+
     // The depths are stored in row major order.
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
         {
             double tmp;
             fscanf(depth_file, "%lf", &tmp);
-            depth.depth(v,u) = tmp;
+            depth.depth(v,u) = tmp;     // depth_euclid: depth along the ray
         }
 
     depth.header = header;

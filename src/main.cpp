@@ -3,7 +3,7 @@
 namespace backward
 {
 backward::SignalHandling sh;
-} // namespace backward
+}; // namespace backward
 
 #include <cstdio>
 #include <string>
@@ -95,28 +95,12 @@ double cal_outlier_ratio(Eigen::MatrixXd& error_map)
     return ans;
 }
 
-void show_depth(const char* window_name, Eigen::MatrixXd &depth, ros::Publisher &pub)
+void show_depth(const char* window_name, Eigen::MatrixXd& depth, ros::Publisher &pub, const std_msgs::Header& header, double max_dep)
 {
     int height,width;
     height = depth.rows();
     width = depth.cols();
 
-    double max_dep = -1;
-    double avg_dep = 0.0;
-    double min_dep = -1;
-    int avg_cnt = 0;
-    for (int v=0;v<height;v++)
-        for (int u=0;u<width;u++)
-            if (depth(v,u) < 700.0f)
-            {
-                avg_dep += depth(v,u);
-                avg_cnt++;
-                if (depth(v,u) > max_dep)
-                    max_dep = depth(v,u);
-                if (min_dep<0 || depth(v,u) < min_dep)
-                    min_dep = depth(v,u);
-            }
-    ROS_WARN("%s: %d x %d, max_dep = %lf, min_dep = %lf, avg_dep = %lf",window_name, height, width, max_dep, min_dep, avg_dep/avg_cnt);
     cv::Mat show_img = cv::Mat::zeros(height,width,CV_8UC1);
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
@@ -132,7 +116,7 @@ void show_depth(const char* window_name, Eigen::MatrixXd &depth, ros::Publisher 
 
     {
         cv_bridge::CvImage out_msg;
-        out_msg.header.stamp = time_stamp;
+        out_msg.header = header;
         out_msg.encoding = sensor_msgs::image_encodings::BGR8;
         out_msg.image = depth_img.clone();
         pub.publish(out_msg.toImageMsg());
@@ -212,14 +196,57 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
 
     ROS_WARN("density = %lf%%, error = %lf%%, outlier_ratio (10%) = %lf%%", density*100.0, error*100.0,outlier_ratio*100.0);
 
-    show_depth("my_depth",my_depth,pub_my_depth);
-    show_depth("gt_depth",depth_vec[i].depth,pub_gt_depth);
+    // find max_dep, avg_dep, min_dep
+    double gt_max_dep, my_max_dep;
+    double gt_avg_dep, my_avg_dep;
+    double gt_min_dep, my_min_dep;
+    int gt_avg_cnt, my_avg_cnt;
+    gt_max_dep = my_max_dep = -1;
+    gt_avg_dep = my_avg_dep = 0.0;
+    gt_min_dep = my_min_dep = -1;
+    gt_avg_cnt = my_avg_cnt = 0;
+
+    int height,width;
+    height = my_depth.rows();
+    width = my_depth.cols();
+
+    for (int v=0;v<height;v++)
+        for (int u=0;u<width;u++)
+        {
+            if (my_depth(v,u) < 700.0f)
+            {
+                // my_depth
+                my_avg_dep += my_depth(v,u);
+                my_avg_cnt++;
+                if (my_depth(v,u) > my_max_dep)
+                    my_max_dep = my_depth(v,u);
+                if (my_min_dep<0 || my_depth(v,u) < my_min_dep)
+                    my_min_dep = my_depth(v,u);
+            }
+            if (depth_vec[i].depth(v,u) < 700.0f)
+            {   
+                // gt_depth
+                gt_avg_dep += depth_vec[i].depth(v,u);
+                gt_avg_cnt++;
+                if (depth_vec[i].depth(v,u) > gt_max_dep)
+                    gt_max_dep = depth_vec[i].depth(v,u);
+                if (gt_min_dep<0 || depth_vec[i].depth(v,u) < gt_min_dep)
+                    gt_min_dep = depth_vec[i].depth(v,u);
+            }
+        }
+    ROS_WARN("my_depth: %d x %d, max_dep = %lf, min_dep = %lf, avg_dep = %lf", height, width, my_max_dep, my_min_dep, my_avg_dep/my_avg_cnt);
+    ROS_WARN("gt_depth: %d x %d, max_dep = %lf, min_dep = %lf, avg_dep = %lf", height, width, gt_max_dep, gt_min_dep, gt_avg_dep/gt_avg_cnt);
+
+    show_depth("my_depth", my_depth, pub_my_depth,msg->header, gt_max_dep);
+    show_depth("gt_depth", depth_vec[i].depth, pub_gt_depth,msg->header, gt_max_dep);
     show_error_map("error_map",error_map,pub_error_map);
     //cv::waitKey(0);
 }
 
 void main_thread()
 {
+    depth_vec.clear();
+
     for (int i=1;i<=200;i++)
     {
         time_stamp = time_stamp + ros::Duration(0.2);
@@ -227,10 +254,9 @@ void main_thread()
         pub_cur_pose.publish(uzh->next_pose());
         pub_image.publish(uzh->next_img());
 
-/*
-        depth_data.stamp = time_stamp.toSec();
+        Depth_data depth_data = uzh->next_depth();
+
         depth_vec.push_back(depth_data);
-*/
 
         getchar();
     }
@@ -248,11 +274,10 @@ int main(int argc, char **argv)
 
     pub_cur_pose = nh.advertise<geometry_msgs::PoseStamped>("cur_pose",1000);
     pub_image = nh.advertise<sensor_msgs::Image>("image",1000);
-
-/*
-    pub_my_depth = nh.advertise<sensor_msgs::Image>("my_depth_visual",1000);
     pub_gt_depth = nh.advertise<sensor_msgs::Image>("gt_depth_visual",1000);
+    pub_my_depth = nh.advertise<sensor_msgs::Image>("my_depth_visual",1000);
     pub_error_map = nh.advertise<sensor_msgs::Image>("error_map_visual",1000);
+
     ros::Subscriber sub_depth = nh.subscribe("/motion_stereo_left/depth/image_raw",1000,depth_callback);
 
     boost::thread th1(main_thread);
@@ -261,7 +286,6 @@ int main(int argc, char **argv)
     {
         ros::spinOnce();
     }
-*/
 
     main_thread();
 
