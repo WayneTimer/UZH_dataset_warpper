@@ -22,6 +22,12 @@ backward::SignalHandling sh;
 #define DOUBLE_EPS 1e-6
 #define PYRDOWN_LEVEL 3
 
+// UZH dataset
+#define WIDTH 640
+#define HEIGHT 480
+// 10% error in ground truth would be considered as outliers
+#define OUTLIER_RATIO 0.10
+
 class CALI_PARA
 {
 public:
@@ -88,7 +94,7 @@ double cal_outlier_ratio(Eigen::MatrixXd& error_map)
             if (error_map(v,u) > 0.0)
             {
                 cnt = cnt + 1.0;
-                if (error_map(v,u) > 0.10)
+                if (error_map(v,u) > OUTLIER_RATIO)
                     ans = ans + 1.0;
             }
     ans = ans / cnt;
@@ -130,37 +136,37 @@ void show_error_map(const char* window_name, Eigen::MatrixXd &error_map, ros::Pu
     height = error_map.rows();
     width = error_map.cols();
 
-    double max_dep = -1;
-    double avg_dep = 0.0;
-    double min_dep = -1;
+    double max_err = -1;
+    double avg_err = 0.0;
+    double min_err = -1;
     int avg_cnt = 0;
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
             if (error_map(v,u) > 0.0)
             {
-                avg_dep += error_map(v,u);
+                avg_err += error_map(v,u);
                 avg_cnt++;
-                if (error_map(v,u) > max_dep)
-                    max_dep = error_map(v,u);
-                if (min_dep<0 || error_map(v,u) < min_dep)
-                    min_dep = error_map(v,u);
+                if (error_map(v,u) > max_err)
+                    max_err = error_map(v,u);
+                if (min_err<0 || error_map(v,u) < min_err)
+                    min_err = error_map(v,u);
             }
-    ROS_WARN("%s: %d x %d, max_error = %lf%%, min_error = %lf%%, avg_error = %lf%%",window_name, height, width, max_dep*100.0, min_dep*100.0, avg_dep*100.0/avg_cnt);
+    ROS_WARN("%s: %d x %d, max_error = %lf%%, min_error = %lf%%, avg_error = %lf%%",window_name, height, width, max_err*100.0, min_err*100.0, avg_err*100.0/avg_cnt);
 
-    max_dep = 0.20;
+    max_err = 0.30;   // truncated the max_err at 30% to visual
 
     cv::Mat show_img = cv::Mat::zeros(height,width,CV_8UC1);
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
             if (error_map(v,u) > 0.0)
             {
-                double t = error_map(v,u)*255.0 / max_dep;
+                double t = error_map(v,u)*255.0 / max_err;
                 if (t<0) t = 0.0;
                 if (t>255) t = 255.0;
                 show_img.at<uchar>(v,u) = (uchar)t;
             }
     cv::Mat depth_img;
-    cv::applyColorMap(show_img, depth_img, cv::COLORMAP_JET);
+    cv::applyColorMap(show_img, depth_img, cv::COLORMAP_JET);   //  red: big error,  blur: small error
 
     {
         cv_bridge::CvImage out_msg;
@@ -268,6 +274,8 @@ int main(int argc, char **argv)
     ros::NodeHandle nh("~");
 
     path_base = readParam<std::string>(nh, "dataset_path_base");
+    cali.width[0] = WIDTH;
+    cali.height[0] = HEIGHT;
 
     uzh = UZH_warpperPtr(new UZH_warpper(path_base, 640, 480));
     time_stamp = ros::Time::now();
