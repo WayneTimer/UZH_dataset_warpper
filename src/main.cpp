@@ -40,6 +40,7 @@ CALI_PARA cali;
 std::vector<Depth_data> depth_vec;
 ros::Publisher pub_cur_pose, pub_image;
 ros::Publisher pub_my_depth, pub_gt_depth, pub_error_map;
+ros::Publisher pub_gt_depth_float;
 
 std::string path_base;
 UZH_warpperPtr uzh;
@@ -128,6 +129,26 @@ void show_depth(const char* window_name, Eigen::MatrixXd& depth, ros::Publisher 
         pub.publish(out_msg.toImageMsg());
     }
     //cv::imshow(window_name, depth_img);
+}
+
+void pub_depth(Eigen::MatrixXd& depth, ros::Publisher &pub, const std_msgs::Header& header)
+{
+    int height,width;
+    height = depth.rows();
+    width = depth.cols();
+
+    cv::Mat result = cv::Mat::zeros(height,width,CV_32FC1);
+    for (int v=0;v<height;v++)
+        for (int u=0;u<width;u++)
+            result.at<float>(v,u) = depth(v,u);
+
+    {
+        cv_bridge::CvImage out_msg;
+        out_msg.header = header;
+        out_msg.encoding = sensor_msgs::image_encodings::TYPE_32FC1;
+        out_msg.image = result.clone();
+        pub.publish(out_msg.toImageMsg());
+    }
 }
 
 void show_error_map(const char* window_name, Eigen::MatrixXd &error_map, ros::Publisher &pub)
@@ -244,7 +265,8 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
     ROS_WARN("gt_depth: %d x %d, max_dep = %lf, min_dep = %lf, avg_dep = %lf", height, width, gt_max_dep, gt_min_dep, gt_avg_dep/gt_avg_cnt);
 
     show_depth("my_depth", my_depth, pub_my_depth,msg->header, gt_max_dep);
-    show_depth("gt_depth", depth_vec[i].depth, pub_gt_depth,msg->header, gt_max_dep);
+    show_depth("gt_depth", depth_vec[i].depth, pub_gt_depth, msg->header, gt_max_dep);
+    pub_depth(depth_vec[i].depth, pub_gt_depth_float, msg->header);
     show_error_map("error_map",error_map,pub_error_map);
     //cv::waitKey(0);
 }
@@ -268,6 +290,7 @@ void main_thread()
     }
 }
 
+// all depth should be in Euclid distance
 int main(int argc, char **argv)
 {
     ros::init(argc,argv,"UZH_dataset_warpper");
@@ -282,6 +305,7 @@ int main(int argc, char **argv)
 
     pub_cur_pose = nh.advertise<geometry_msgs::PoseStamped>("cur_pose",1000);
     pub_image = nh.advertise<sensor_msgs::Image>("image",1000);
+    pub_gt_depth_float = nh.advertise<sensor_msgs::Image>("gt_depth_float",1000);
     pub_gt_depth = nh.advertise<sensor_msgs::Image>("gt_depth_visual",1000);
     pub_my_depth = nh.advertise<sensor_msgs::Image>("my_depth_visual",1000);
     pub_error_map = nh.advertise<sensor_msgs::Image>("error_map_visual",1000);
