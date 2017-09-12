@@ -24,7 +24,7 @@ class UZH_warpper
 public:
     UZH_warpper(std::string _path_base, int _width, int _height);
     void set_next_header_stamp(ros::Time &stamp);
-    geometry_msgs::PoseStamped next_pose();
+    geometry_msgs::PoseStamped next_pose(int &cnt);
     sensor_msgs::ImagePtr next_img();
     Depth_data next_depth();
 

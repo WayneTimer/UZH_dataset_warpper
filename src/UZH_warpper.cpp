@@ -35,11 +35,10 @@ void UZH_warpper::set_next_header_stamp(ros::Time &stamp)
     header.stamp = stamp;
 }
 
-geometry_msgs::PoseStamped UZH_warpper::next_pose()
+geometry_msgs::PoseStamped UZH_warpper::next_pose(int &cnt)
 {
     geometry_msgs::PoseStamped pose;
 
-    int cnt;
     double tx,ty,tz,qx,qy,qz,qw;
 
     fscanf(gt_info, "%d %lf %lf %lf %lf %lf %lf %lf",

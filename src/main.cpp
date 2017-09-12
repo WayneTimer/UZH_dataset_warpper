@@ -28,6 +28,14 @@ backward::SignalHandling sh;
 // 10% error in ground truth would be considered as outliers
 #define OUTLIER_RATIO 0.10
 
+// set a sensing range
+#define MAX_DEPTH 12.0
+
+char save_folder[] = "/home/timer/icra2018data/uzh_mapping_k=(3,1,0)";
+char save_file[] = "/home/timer/icra2018data/uzh_mapping_k=(3,1,0)/record.txt";
+FILE *record_file;
+
+
 class CALI_PARA
 {
 public:
@@ -46,6 +54,8 @@ std::string path_base;
 UZH_warpperPtr uzh;
 ros::Time time_stamp;
 
+int idx;
+
 double cal_density(Eigen::MatrixXd& depth)
 {
     double ans = 0.0;
@@ -54,7 +64,7 @@ double cal_density(Eigen::MatrixXd& depth)
 
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
-            if (depth(v,u) < 700.0)
+            if (depth(v,u) < MAX_DEPTH)
                 ans = ans + 1.0;
     ans = ans / (height*width);
     return ans;
@@ -71,7 +81,7 @@ double cal_error(Eigen::MatrixXd& my_depth, Eigen::MatrixXd& gt_depth, Eigen::Ma
 
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
-            if (my_depth(v,u) < 700.0)
+            if (my_depth(v,u) < MAX_DEPTH)
             {
                 error_map(v,u) = fabs(my_depth(v,u) - gt_depth(v,u)) / fabs(gt_depth(v,u));
                 ans = ans + error_map(v,u);
@@ -102,7 +112,9 @@ double cal_outlier_ratio(Eigen::MatrixXd& error_map)
     return ans;
 }
 
-void show_depth(const char* window_name, Eigen::MatrixXd& depth, ros::Publisher &pub, const std_msgs::Header& header, double max_dep)
+void show_depth(const char* window_name, Eigen::MatrixXd& depth, ros::Publisher &pub, const std_msgs::Header& header, double max_dep,
+                char *img_save_path
+               )
 {
     int height,width;
     height = depth.rows();
@@ -127,6 +139,9 @@ void show_depth(const char* window_name, Eigen::MatrixXd& depth, ros::Publisher 
         out_msg.encoding = sensor_msgs::image_encodings::BGR8;
         out_msg.image = depth_img.clone();
         pub.publish(out_msg.toImageMsg());
+
+        if (img_save_path)
+            cv::imwrite(img_save_path, depth_img);
     }
     //cv::imshow(window_name, depth_img);
 }
@@ -151,7 +166,9 @@ void pub_depth(Eigen::MatrixXd& depth, ros::Publisher &pub, const std_msgs::Head
     }
 }
 
-void show_error_map(const char* window_name, Eigen::MatrixXd &error_map, ros::Publisher &pub)
+void show_error_map(const char* window_name, Eigen::MatrixXd &error_map, ros::Publisher &pub,
+                    char *img_save_path
+                   )
 {
     int height,width;
     height = error_map.rows();
@@ -195,6 +212,9 @@ void show_error_map(const char* window_name, Eigen::MatrixXd &error_map, ros::Pu
         out_msg.encoding = sensor_msgs::image_encodings::BGR8;
         out_msg.image = depth_img.clone();
         pub.publish(out_msg.toImageMsg());
+
+        if (img_save_path)
+            cv::imwrite(img_save_path, depth_img);
     }
 }
 
@@ -211,6 +231,11 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
         if (t < DOUBLE_EPS)
             break;
     }
+    if (i>=l)
+    {
+        ROS_ERROR(" i >= l, can not find correct gt_depth in depth_vec.");
+        ros::shutdown();
+    }
 
     cv_bridge::CvImagePtr depth_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::TYPE_32FC1);
     Eigen::MatrixXd my_depth;
@@ -221,7 +246,7 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
     double error = cal_error(my_depth, depth_vec[i].depth, error_map);
     double outlier_ratio = cal_outlier_ratio(error_map);
 
-    ROS_WARN("density = %lf%%, error = %lf%%, outlier_ratio (10%) = %lf%%", density*100.0, error*100.0,outlier_ratio*100.0);
+    ROS_WARN("density = %lf%%, error = %lf%%, outlier_ratio (10%) = %lf%%", density*100.0, error*100.0, outlier_ratio*100.0);
 
     // find max_dep, avg_dep, min_dep
     double gt_max_dep, my_max_dep;
@@ -240,7 +265,7 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
     for (int v=0;v<height;v++)
         for (int u=0;u<width;u++)
         {
-            if (my_depth(v,u) < 700.0f)
+            if (my_depth(v,u) < MAX_DEPTH)
             {
                 // my_depth
                 my_avg_dep += my_depth(v,u);
@@ -250,7 +275,7 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
                 if (my_min_dep<0 || my_depth(v,u) < my_min_dep)
                     my_min_dep = my_depth(v,u);
             }
-            if (depth_vec[i].depth(v,u) < 700.0f)
+            if (depth_vec[i].depth(v,u) < MAX_DEPTH)
             {   
                 // gt_depth
                 gt_avg_dep += depth_vec[i].depth(v,u);
@@ -264,10 +289,21 @@ void depth_callback(const sensor_msgs::ImageConstPtr msg)
     ROS_WARN("my_depth: %d x %d, max_dep = %lf, min_dep = %lf, avg_dep = %lf", height, width, my_max_dep, my_min_dep, my_avg_dep/my_avg_cnt);
     ROS_WARN("gt_depth: %d x %d, max_dep = %lf, min_dep = %lf, avg_dep = %lf", height, width, gt_max_dep, gt_min_dep, gt_avg_dep/gt_avg_cnt);
 
-    show_depth("my_depth", my_depth, pub_my_depth,msg->header, gt_max_dep);
-    show_depth("gt_depth", depth_vec[i].depth, pub_gt_depth, msg->header, gt_max_dep);
     pub_depth(depth_vec[i].depth, pub_gt_depth_float, msg->header);
-    show_error_map("error_map",error_map,pub_error_map);
+
+    // save data
+    fprintf(record_file, "%d %lf %lf %lf %lf %lf\n", idx, density*100.0, error*100.0, outlier_ratio*100.0, my_avg_dep/my_avg_cnt, gt_avg_dep/gt_avg_cnt);
+    fflush(record_file);
+    char img_save_path[100];
+
+    sprintf(img_save_path,"%s/%d_my_depth.png", save_folder, idx);
+    show_depth("my_depth", my_depth, pub_my_depth,msg->header, MAX_DEPTH, img_save_path);
+
+    sprintf(img_save_path,"%s/%d_gt_depth.png", save_folder, idx);
+    show_depth("gt_depth", depth_vec[i].depth, pub_gt_depth, msg->header, MAX_DEPTH,img_save_path);
+
+    sprintf(img_save_path,"%s/%d_error_map.png", save_folder, idx);
+    show_error_map("error_map",error_map,pub_error_map,img_save_path);
     //cv::waitKey(0);
 }
 
@@ -279,15 +315,20 @@ void main_thread()
     {
         time_stamp = time_stamp + ros::Duration(0.2);
         uzh->set_next_header_stamp(time_stamp);
-        pub_cur_pose.publish(uzh->next_pose());
-        pub_image.publish(uzh->next_img());
-
+        pub_cur_pose.publish(uzh->next_pose(idx));
+        
         Depth_data depth_data = uzh->next_depth();
-
         depth_vec.push_back(depth_data);
+        
+        pub_image.publish(uzh->next_img());
+        printf("i = %d, idx = %d\n", i, idx);
 
-        getchar();
+        //getchar();
+        sleep(1.0);
     }
+
+    fclose(record_file);
+    puts("Done with fclose()");    
 }
 
 // all depth should be in Euclid distance
@@ -303,14 +344,16 @@ int main(int argc, char **argv)
     uzh = UZH_warpperPtr(new UZH_warpper(path_base, 640, 480));
     time_stamp = ros::Time::now();
 
-    pub_cur_pose = nh.advertise<geometry_msgs::PoseStamped>("cur_pose",1000);
-    pub_image = nh.advertise<sensor_msgs::Image>("image",1000);
-    pub_gt_depth_float = nh.advertise<sensor_msgs::Image>("gt_depth_float",1000);
-    pub_gt_depth = nh.advertise<sensor_msgs::Image>("gt_depth_visual",1000);
-    pub_my_depth = nh.advertise<sensor_msgs::Image>("my_depth_visual",1000);
-    pub_error_map = nh.advertise<sensor_msgs::Image>("error_map_visual",1000);
+    pub_cur_pose = nh.advertise<geometry_msgs::PoseStamped>("cur_pose",100);
+    pub_image = nh.advertise<sensor_msgs::Image>("image",100);
+    pub_gt_depth_float = nh.advertise<sensor_msgs::Image>("gt_depth_float",100);
+    pub_gt_depth = nh.advertise<sensor_msgs::Image>("gt_depth_visual",100);
+    pub_my_depth = nh.advertise<sensor_msgs::Image>("my_depth_visual",100);
+    pub_error_map = nh.advertise<sensor_msgs::Image>("error_map_visual",100);
 
-    ros::Subscriber sub_depth = nh.subscribe("/motion_stereo_left/depth/image_raw",1000,depth_callback);
+    ros::Subscriber sub_depth = nh.subscribe("/motion_stereo_left/depth/image_raw",100,depth_callback);
+
+    record_file = fopen(save_file,"w");
 
     boost::thread th1(main_thread);
  
@@ -319,7 +362,7 @@ int main(int argc, char **argv)
         ros::spinOnce();
     }
 
-    main_thread();
+    //main_thread();
 
     return 0;
 }
